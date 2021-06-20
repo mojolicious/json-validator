@@ -57,6 +57,7 @@ __DATA__
 @@ relative-to-the-root.json.ep
 {
   "id": "http://example.com/relative-to-the-root.json",
+  "$schema": "http://json-schema.org/draft-04/schema#",
   "definitions": {
     "A": { "id": "#a" },
     "B": {

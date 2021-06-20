@@ -27,10 +27,10 @@ subtest 'Run multiple times to make sure _reset() works' => sub {
 
 subtest 'check bundled structure' => sub {
   is $jv->get([qw(surname type)]), 'string', 'get /surname/$ref';
-  is $jv->get('/surname/type'), 'string', 'get /surname/type';
-  is $jv->get('/surname/$ref'), undef,    'get /surname/$ref';
-  is $jv->schema->get('/surname/type'), 'string',             'schema get /surname/type';
-  is $jv->schema->get('/surname/$ref'), '#/definitions/name', 'schema get /surname/$ref';
+  is $jv->get('/surname/type'), 'string',             'get /surname/type';
+  is $jv->get('/surname/$ref'), '#/definitions/name', 'get /surname/$ref';
+  is $jv->schema->get('/surname/type'), 'string', 'schema get /surname/type';
+  is $jv->schema->data->{surname}{'$ref'}, '#/definitions/name', 'schema get /surname/$ref';
 
   my $bundled = $jv->schema('data://main/bundled.json')->bundle;
   is_deeply [sort keys %{$bundled->{definitions}}], ['objtype'], 'no dup definitions';

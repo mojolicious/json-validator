@@ -32,6 +32,8 @@ has moniker => sub {
   return '';
 };
 
+has recursive_data_protection => 1;
+
 has specification => sub {
   my $data = shift->data;
   is_type($data, 'HASH') ? $data->{'$schema'} || $data->{schema} || '' : '';

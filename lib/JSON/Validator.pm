@@ -102,7 +102,7 @@ sub coerce {
   return $self;
 }
 
-sub get { JSON::Validator::Util::schema_extract(shift->schema->data, shift) }
+sub get { shift->schema->get(@_) }
 
 sub load_and_validate_schema {
   my ($self, $schema, $args) = @_;
@@ -132,14 +132,7 @@ sub schema {
 
 sub validate {
   my ($self, $data, $schema) = @_;
-  Mojo::Util::deprecated('validation(..., $schema) will be deprecated. Set schema() first instead') if $schema;
-
-  $schema //= $self->schema->data;
-  return E '/', 'No validation rules defined.' unless defined $schema;
-
-  my %state  = (path => '', root => $schema, schema => $schema, seen => {});
-  my @errors = sort { $a->path cmp $b->path } $self->_validate($_[1], $self->_state(\%state));
-  return @errors;
+  return +(defined $schema ? $self->_new_schema($schema) : $self->schema)->validate($_[1]);
 }
 
 sub _definitions_path {
@@ -175,9 +168,6 @@ sub _definitions_path {
 }
 
 sub _definitions_path_for_ref { ['definitions'] }
-
-# Try not to break JSON::Validator::OpenAPI::Mojolicious
-sub _get { shift; JSON::Validator::Util::_schema_extract(@_) }
 
 sub _find_and_resolve_refs {
   my ($self, $base_url, $schema) = @_;
@@ -240,6 +230,8 @@ sub _new_schema {
   my $store  = $self->store;
   my $schema = $loadable ? $store->get($store->load($source)) : $source;
 
+  $attrs{recursive_data_protection} //= $self->recursive_data_protection;
+
   $attrs{coerce}  ||= $self->{coerce}  if $self->{coerce};
   $attrs{formats} ||= $self->{formats} if $self->{formats};
   $attrs{specification} = $schema->{'$schema'}
@@ -259,7 +251,7 @@ sub _new_schema {
     }
   }
 
-  my $schema_class = $spec && $SCHEMAS{$spec} || 'JSON::Validator::Schema::Draft4';
+  my $schema_class = $spec && $SCHEMAS{$spec} || 'JSON::Validator::Schema';
   $schema_class =~ s!^\+(.+)$!JSON::Validator::Schema::$1!;
   confess "Could not load $schema_class: $@" unless $schema_class->can('new') or eval "require $schema_class;1";
   return $schema_class->new($source, %attrs);
@@ -334,27 +326,6 @@ sub _resolve_ref {
   $fqn->fragment($pointer // '');
   return $other, $ref_url, $fqn;
 }
-
-# DEPRECATED
-sub _state                 { goto &JSON::Validator::Schema::_state }
-sub _validate              { goto &JSON::Validator::Schema::_validate }
-sub _validate_all_of       { goto &JSON::Validator::Schema::_validate_all_of }
-sub _validate_any_of       { goto &JSON::Validator::Schema::_validate_any_of }
-sub _validate_any_of_types { goto &JSON::Validator::Schema::_validate_any_of_types }
-sub _validate_format       { goto &JSON::Validator::Schema::_validate_format }
-sub _validate_number_max   { goto &JSON::Validator::Schema::_validate_number_max }
-sub _validate_number_min   { goto &JSON::Validator::Schema::_validate_number_min }
-sub _validate_one_of       { goto &JSON::Validator::Schema::_validate_one_of }
-sub _validate_type_any     { goto &JSON::Validator::Schema::_validate_type_any }
-sub _validate_type_array   { goto &JSON::Validator::Schema::_validate_type_array }
-sub _validate_type_boolean { goto &JSON::Validator::Schema::_validate_type_boolean }
-sub _validate_type_const   { goto &JSON::Validator::Schema::_validate_type_const }
-sub _validate_type_enum    { goto &JSON::Validator::Schema::_validate_type_enum }
-sub _validate_type_integer { goto &JSON::Validator::Schema::_validate_type_integer }
-sub _validate_type_null    { goto &JSON::Validator::Schema::_validate_type_null }
-sub _validate_type_number  { goto &JSON::Validator::Schema::_validate_type_number }
-sub _validate_type_object  { goto &JSON::Validator::Schema::_validate_type_object }
-sub _validate_type_string  { goto &JSON::Validator::Schema::_validate_type_string }
 
 1;
 

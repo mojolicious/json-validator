@@ -1,11 +1,12 @@
 use Mojo::Base -strict;
 use JSON::Validator;
+use JSON::Validator::Schema;
 use Mojo::Util 'monkey_patch';
 use Scalar::Util qw(refaddr);
 use Test::More;
 
-my ($original_validate, %ref_counts) = (\&JSON::Validator::_validate);
-monkey_patch 'JSON::Validator', _validate => sub {
+my ($original_validate, %ref_counts) = (\&JSON::Validator::Schema::_validate);
+monkey_patch 'JSON::Validator::Schema', _validate => sub {
   my ($self, $data, $path, $schema) = @_;
   $ref_counts{refaddr($data)}++ if ref $data;
   goto &$original_validate;
