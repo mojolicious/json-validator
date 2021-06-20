@@ -40,53 +40,38 @@ for my $method (qw(cache_paths ua)) {
 
 sub bundle {
   my ($self, $args) = @_;
-  my $cloner;
 
   my $get_data  = $self->can('data') ? 'data' : 'schema';
   my $schema    = $self->_new_schema($args->{schema} || $self->$get_data);
   my $schema_id = $schema->id;
   my @topics    = ([$schema->data, my $bundle = {}]);                        # ([$from, $to], ...);
 
-  if ($args->{replace}) {
-    $cloner = sub {
-      my $from      = shift;
-      my $from_type = ref $from;
-      my $tied      = $from_type eq 'HASH' && tied %$from;
+  my $cloner = sub {
+    my $from      = shift;
+    my $from_type = ref $from;
+    my $tied      = $from_type eq 'HASH' && tied %$from;
 
-      $from = $tied->schema if $tied;
+    unless ($tied) {
       my $to = $from_type eq 'ARRAY' ? [] : $from_type eq 'HASH' ? {} : $from;
       push @topics, [$from, $to] if $from_type;
       return $to;
-    };
-  }
-  else {
-    $cloner = sub {
-      my $from      = shift;
-      my $from_type = ref $from;
-      my $tied      = $from_type eq 'HASH' && tied %$from;
+    }
 
-      unless ($tied) {
-        my $to = $from_type eq 'ARRAY' ? [] : $from_type eq 'HASH' ? {} : $from;
-        push @topics, [$from, $to] if $from_type;
-        return $to;
-      }
+    # Traverse all $ref
+    while (my $tmp = tied %{$tied->schema}) { $tied = $tmp }
 
-      # Traverse all $ref
-      while (my $tmp = tied %{$tied->schema}) { $tied = $tmp }
+    return $from if !$args->{schema} and $tied->fqn =~ m!^\Q$schema_id\E\#!;
 
-      return $from if !$args->{schema} and $tied->fqn =~ m!^\Q$schema_id\E\#!;
+    my $path = $self->_definitions_path($bundle, $tied);
+    unless ($self->{bundled_refs}{$tied->fqn}++) {
+      push @topics, [_node($schema->data, $path, 1, 0) || {}, _node($bundle, $path, 1, 1)];
+      push @topics, [$tied->schema, _node($bundle, $path, 0, 1)];
+    }
 
-      my $path = $self->_definitions_path($bundle, $tied);
-      unless ($self->{bundled_refs}{$tied->fqn}++) {
-        push @topics, [_node($schema->data, $path, 1, 0) || {}, _node($bundle, $path, 1, 1)];
-        push @topics, [$tied->schema, _node($bundle, $path, 0, 1)];
-      }
-
-      $path = join '/', '#', @$path;
-      tie my %ref, 'JSON::Validator::Ref', $tied->schema, $path;
-      return \%ref;
-    };
-  }
+    $path = join '/', '#', @$path;
+    tie my %ref, 'JSON::Validator::Ref', $tied->schema, $path;
+    return \%ref;
+  };
 
   local $self->{bundled_refs} = {};
 
