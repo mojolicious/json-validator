@@ -54,19 +54,19 @@ sub time_schema {
 }
 
 __DATA__
-# Sun Jun 20 11:30:11 2021
+# Sun Jun 20 11:35:36 2021
 # n_times=200
 
 ok 1 - valid schema
-ok 2 - defaults - resolve 1.20276212692261s
-ok 3 - defaults - validate 1.82127380371094s
-not ok 4 - defaults - total 3.02403593063354s
+ok 2 - defaults - resolve 1.20628547668457s
+ok 3 - defaults - validate 1.79121541976929s
+not ok 4 - defaults - total 2.99750089645386s
 
-#   Failed test 'defaults - total 3.02403593063354s'
+#   Failed test 'defaults - total 2.99750089645386s'
 #   at t/benchmark.t line 53.
 ok 5 - valid schema
-ok 6 - resolve_before - validate 1.6573007106781s
-ok 7 - resolve_before - total 1.65737271308899s
+ok 6 - resolve_before - validate 1.62944054603577s
+ok 7 - resolve_before - total 1.62952208518982s
                s/iter       defaults resolve_before
-defaults         3.01             --           -45%
-resolve_before   1.65            82%             --
+defaults         3.00             --           -46%
+resolve_before   1.63            84%             --
