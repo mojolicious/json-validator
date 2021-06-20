@@ -2,8 +2,8 @@ use Mojo::Base -strict;
 use Mojo::JSON 'false';
 use Mojo::Util 'md5_sum';
 use JSON::Validator;
-use JSON::Validator::Util
-  qw(E data_checksum data_type negotiate_content_type schema_type prefix_errors is_type json_pointer);
+use JSON::Validator::Util qw(E data_checksum data_type negotiate_content_type schema_type prefix_errors json_pointer);
+use JSON::Validator::Util qw(is_bool is_num is_type);
 use Test::More;
 
 my $e = E '/path/x', 'some error';
@@ -19,16 +19,18 @@ is data_type(undef), 'null', 'data_type null';
 is data_type($e), 'JSON::Validator::Error', 'data_type JSON::Validator::Error';
 
 my $v = JSON::Validator->new;
-ok is_type($v,    'JSON::Validator'), 'is_type JSON::Validator';
-ok is_type($v,    'Mojo::Base'),      'is_type Mojo::Base';
-ok is_type($v,    'HASH'),            'is_type HASH';
-ok is_type([],    'ARRAY'),           'is_type ARRAY';
-ok is_type({},    'HASH'),            'is_type HASH';
-ok is_type(4.2,   'NUM'),             'is_type 4.2';
-ok is_type(42,    'NUM'),             'is_type 42';
-ok is_type(false, 'BOOL'),            'is_type BOOL';
-ok !is_type('2',  'NUM'),             'is_type 2';
-ok !is_type(0,    'BOOL'),            'is_type BOOL';
+ok is_type($v, 'JSON::Validator'), 'is_type JSON::Validator';
+ok is_type($v, 'Mojo::Base'),      'is_type Mojo::Base';
+ok is_type($v, 'HASH'),            'is_type HASH';
+ok is_type([], 'ARRAY'),           'is_type ARRAY';
+ok is_type({}, 'HASH'),            'is_type HASH';
+
+ok is_num(4.2),  'is_num 4.2';
+ok is_num(42),   'is_num 42';
+ok !is_num('2'), 'is_num 2';
+
+ok is_bool(false), 'is_bool';
+ok !is_bool(0), 'is_bool';
 
 is json_pointer(qw(foo bar)),    'foo/bar',      'json_pointer foo bar';
 is json_pointer(qw(f/oo bar)),   'f/oo/bar',     'json_pointer f/oo bar';

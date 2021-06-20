@@ -4,7 +4,7 @@ use Mojo::Base 'JSON::Validator::Schema';
 use JSON::Validator::Schema::Draft4;
 use JSON::Validator::Schema::Draft6;
 use JSON::Validator::Schema::Draft7;
-use JSON::Validator::Util qw(E is_type json_pointer);
+use JSON::Validator::Util qw(E is_bool is_type json_pointer);
 use Scalar::Util qw(blessed refaddr);
 
 my $ANCHOR_RE = qr{[A-Za-z][A-Za-z0-9:._-]*};
@@ -65,7 +65,7 @@ sub _find_and_resolve_refs {
   %seen = ();
   while (@refs) {
     my ($base_url, $topic) = @{shift @refs};
-    next if is_type $topic, 'BOOL';
+    next if is_bool $topic;
     next if !$topic->{'$ref'} or ref $topic->{'$ref'};
     my $base = Mojo::URL->new($base_url || $base_url)->fragment(undef);
     my ($other, $ref_url, $fqn) = $self->_resolve_ref($topic->{'$ref'}, $base, $root);

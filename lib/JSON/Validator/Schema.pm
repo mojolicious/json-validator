@@ -3,7 +3,8 @@ use Mojo::Base 'JSON::Validator';    # TODO: Change this to "use Mojo::Base -bas
 
 use Carp qw(carp confess);
 use JSON::Validator::Formats;
-use JSON::Validator::Util qw(E data_checksum data_type is_type json_pointer prefix_errors schema_type);
+use JSON::Validator::Util qw(E data_checksum data_type json_pointer prefix_errors schema_type);
+use JSON::Validator::Util qw(is_bool is_num is_type);
 use List::Util qw(uniq);
 use Mojo::JSON qw(false true);
 use Mojo::JSON::Pointer;
@@ -146,7 +147,7 @@ sub _state {
 sub _validate {
   my ($self, $data, $state) = @_;
   my $schema = $state->{schema};
-  return $schema ? () : E $state->{path}, [not => 'not'] if is_type $schema, 'BOOL';
+  return $schema ? () : E $state->{path}, [not => 'not'] if is_bool $schema;
 
   my @errors;
   if ($self->recursive_data_protection) {
@@ -304,10 +305,10 @@ sub _validate_number_max {
   my @errors;
 
   my $cmp_with = $schema->{exclusiveMaximum} // '';
-  if (is_type $cmp_with, 'BOOL') {
+  if (is_bool $cmp_with) {
     push @errors, E $path, [$expected => ex_maximum => $value, $schema->{maximum}] unless $value < $schema->{maximum};
   }
-  elsif (is_type $cmp_with, 'NUM') {
+  elsif (is_num $cmp_with) {
     push @errors, E $path, [$expected => ex_maximum => $value, $cmp_with] unless $value < $cmp_with;
   }
 
@@ -325,10 +326,10 @@ sub _validate_number_min {
   my @errors;
 
   my $cmp_with = $schema->{exclusiveMinimum} // '';
-  if (is_type $cmp_with, 'BOOL') {
+  if (is_bool $cmp_with) {
     push @errors, E $path, [$expected => ex_minimum => $value, $schema->{minimum}] unless $value > $schema->{minimum};
   }
-  elsif (is_type $cmp_with, 'NUM') {
+  elsif (is_num $cmp_with) {
     push @errors, E $path, [$expected => ex_minimum => $value, $cmp_with] unless $value > $cmp_with;
   }
 
@@ -441,7 +442,7 @@ sub _validate_type_boolean {
     $_[1] = true  if $value =~ m!^(1|true)$!;
   }
 
-  return if is_type $_[1], 'BOOL';
+  return if is_bool $_[1];
   return E $state->{path}, [boolean => type => data_type $value];
 }
 
@@ -470,7 +471,7 @@ sub _validate_type_number {
   if (!defined $value or ref $value) {
     return E $state->{path}, [$expected => type => data_type $value];
   }
-  unless (is_type $value, 'NUM') {
+  unless (is_num $value) {
     return E $state->{path}, [$expected => type => data_type $value]
       if !$self->{coerce}{numbers} or $value !~ /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
     $_[1] = 0 + $value;    # coerce input value

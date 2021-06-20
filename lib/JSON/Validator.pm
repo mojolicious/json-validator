@@ -4,7 +4,7 @@ use Mojo::Base -base;
 use Carp qw(confess);
 use JSON::Validator::Ref;
 use JSON::Validator::Store;
-use JSON::Validator::Util qw(E data_checksum is_type);
+use JSON::Validator::Util qw(E data_checksum is_bool is_type);
 use Mojo::File qw(path);
 use Mojo::URL;
 use Mojo::Util qw(monkey_patch sha1_sum);
@@ -204,7 +204,7 @@ sub _find_and_resolve_refs {
 
   while (@refs) {
     my ($base_url, $topic) = @{shift @refs};
-    next if is_type $topic, 'BOOL';
+    next if is_bool $topic;
     next if !$topic->{'$ref'} or ref $topic->{'$ref'};
     my $base = Mojo::URL->new($base_url || $base_url)->fragment(undef);
     my ($other, $ref_url, $fqn) = $self->_resolve_ref($topic->{'$ref'}, $base, \%root);
@@ -280,7 +280,7 @@ sub _register_root_schema {
 # resolve all the $ref's that we find inside JSON Schema specification.
 sub _resolve {
   my ($self, $schema, $nested) = @_;
-  return $schema if is_type $schema, 'BOOL';
+  return $schema if is_bool $schema;
 
   my ($id_key, $id, $cached_id, $resolved) = ($self->_id_key);
   if (ref $schema eq 'HASH') {

@@ -15,8 +15,8 @@ use Scalar::Util 'blessed';
 use constant SEREAL_SUPPORT => !$ENV{JSON_VALIDATOR_NO_SEREAL} && eval 'use Sereal::Encoder 4.00;1';
 
 our @EXPORT_OK = (
-  qw(E data_checksum data_section data_type is_type negotiate_content_type),
-  qw(schema_extract json_pointer prefix_errors schema_type),
+  qw(E data_checksum data_section data_type is_bool is_num is_type),
+  qw(negotiate_content_type schema_extract json_pointer prefix_errors schema_type),
 );
 
 sub E { JSON::Validator::Error->new(@_) }
@@ -62,7 +62,7 @@ sub data_type {
   return 'null'    if !defined $_[0];
   return 'boolean' if $blessed and ("$_[0]" eq "1" or !"$_[0]");
 
-  if (is_type($_[0], 'NUM')) {
+  if (is_num($_[0])) {
     return 'integer' if grep { ($_->{type} // '') eq 'integer' } @{$_[1] || []};
     return 'number';
   }
@@ -70,21 +70,9 @@ sub data_type {
   return $blessed || 'string';
 }
 
-sub is_type {
-  my $type = $_[1];
-
-  if ($type eq 'BOOL') {
-    return blessed $_[0] && ($_[0]->isa('JSON::PP::Boolean') || "$_[0]" eq "1" || !$_[0]);
-  }
-
-  # NUM
-  if ($type eq 'NUM') {
-    return B::svref_2object(\$_[0])->FLAGS & (B::SVp_IOK | B::SVp_NOK) && 0 + $_[0] eq $_[0] && $_[0] * 0 == 0;
-  }
-
-  # Class or data type
-  return blessed $_[0] ? $_[0]->isa($type) : ref $_[0] eq $type;
-}
+sub is_bool { blessed $_[0] && ($_[0]->isa('JSON::PP::Boolean') || "$_[0]" eq "1" || !$_[0]) }
+sub is_num  { B::svref_2object(\$_[0])->FLAGS & (B::SVp_IOK | B::SVp_NOK) && 0 + $_[0] eq $_[0] && $_[0] * 0 == 0 }
+sub is_type { blessed $_[0] ? $_[0]->isa($_[1]) : ref $_[0] eq $_[1] }
 
 sub negotiate_content_type {
   my ($accepts, $header) = @_;
@@ -277,27 +265,24 @@ Returns the JSON type for C<$any>. C<$str> can be array, boolean, integer,
 null, number object or string. Note that a list of schemas need to be provided
 to differentiate between "integer" and "number".
 
+=head2 is_bool
+
+  $bool = is_bool $any;
+
+Checks if C<$any> looks like a boolean.
+
+=head2 is_num
+
+  $bool = is_num $any;
+
+Checks if C<$any> looks like a number.
+
 =head2 is_type
 
   $bool = is_type $any, $class;
-  $bool = is_type $any, $type; # $type = "ARRAY", "BOOL", "HASH", "NUM" ...
+  $bool = is_type $any, $type;
 
-Checks if C<$any> is a, or inherits from, C<$class> or C<$type>. Two special
-types can be checked:
-
-=over 2
-
-=item * BOOL
-
-Checks if C<$any> is a boolean value. C<$any> is considered boolean if it is an
-object inheriting from L<JSON::PP::Boolean> or is another object that
-stringifies to "1" or "0".
-
-=item * NUM
-
-Checks if C<$any> is indeed a number.
-
-=back
+Checks if C<$any> is a, or inherits from, C<$class> or C<$type>.
 
 =head2 json_pointer
 
