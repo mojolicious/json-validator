@@ -10,8 +10,6 @@ use Mojo::URL;
 use Mojo::Util qw(monkey_patch sha1_sum);
 use Scalar::Util qw(blessed refaddr);
 
-use constant RECURSION_LIMIT => $ENV{JSON_VALIDATOR_RECURSION_LIMIT} || 100;
-
 our $VERSION = '4.20';
 
 our %SCHEMAS = (
@@ -139,10 +137,8 @@ sub validate {
   $schema //= $self->schema->data;
   return E '/', 'No validation rules defined.' unless defined $schema;
 
-  local $self->{schema}      = $self->_new_schema($schema);
-  local $self->{seen}        = {};
-  local $self->{temp_schema} = [];                            # make sure random-errors.t does not fail
-  my @errors = sort { $a->path cmp $b->path } $self->_validate($_[1], '', $schema);
+  my %state  = (path => '', root => $schema, schema => $schema, seen => {});
+  my @errors = sort { $a->path cmp $b->path } $self->_validate($_[1], $self->_state(\%state));
   return @errors;
 }
 
@@ -282,21 +278,6 @@ sub _node {
   return $node;
 }
 
-sub _ref_to_schema {
-  my ($self, $schema) = @_;
-  return $schema if ref $schema ne 'HASH';
-
-  my @guard;
-  while (my $tied = tied %$schema) {
-    push @guard, $tied->ref;
-    confess "Seems like you have a circular reference: @guard" if @guard > RECURSION_LIMIT;
-    $schema = $tied->schema;
-    last if is_type $schema, 'BOOL';
-  }
-
-  return $schema;
-}
-
 sub _register_root_schema {
   my ($self, $id, $schema) = @_;
   confess "Root schema cannot have a fragment in the 'id'. ($id)" if $id =~ /\#./;
@@ -355,6 +336,7 @@ sub _resolve_ref {
 }
 
 # DEPRECATED
+sub _state                 { goto &JSON::Validator::Schema::_state }
 sub _validate              { goto &JSON::Validator::Schema::_validate }
 sub _validate_all_of       { goto &JSON::Validator::Schema::_validate_all_of }
 sub _validate_any_of       { goto &JSON::Validator::Schema::_validate_any_of }

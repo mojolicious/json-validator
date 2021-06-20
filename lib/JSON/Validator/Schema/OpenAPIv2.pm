@@ -348,13 +348,14 @@ sub _validate_request_or_response {
 }
 
 sub _validate_type_file {
-  my ($self, $data, $path, $schema) = @_;
-  return unless $schema->{required} and (not defined $data or not length $data);
-  return E $path => 'Missing property.';
+  my ($self, $data, $state) = @_;
+  return unless $state->{schema}{required} and (not defined $data or not length $data);
+  return E $state->{path} => 'Missing property.';
 }
 
 sub _validate_type_object {
-  my ($self, $data, $path, $schema) = @_;
+  my ($self, $data, $state) = @_;
+  my ($path, $schema) = @$state{qw(path schema)};
   return E $path, [object => type => data_type $data] if ref $data ne 'HASH';
   return shift->SUPER::_validate_type_object(@_) unless $self->{validate_request};
 
@@ -368,18 +369,17 @@ sub _validate_type_object {
   local $schema->{required} = [grep { !$ro{$_} } @{$schema->{required} || []}];
 
   my $discriminator = $schema->{discriminator};
-  if ($discriminator and !$self->{inside_discriminator}) {
+  if ($discriminator and !$state->{inside_discriminator}) {
     return E $path, "Discriminator $discriminator has no value." unless my $name    = $data->{$discriminator};
     return E $path, "No definition for discriminator $name."     unless my $dschema = $self->get("/definitions/$name");
-    local $self->{inside_discriminator} = 1;    # prevent recursion
-    return $self->_validate($data, $path, $dschema);
+    return $self->_validate($data, $self->_state($state, inside_discriminator => 1, schema => $dschema));
   }
 
   return (
     @errors,
-    $self->_validate_type_object_min_max($_[1], $path, $schema),
-    $self->_validate_type_object_dependencies($_[1], $path, $schema),
-    $self->_validate_type_object_properties($_[1], $path, $schema),
+    $self->_validate_type_object_min_max($_[1], $state),
+    $self->_validate_type_object_dependencies($_[1], $state),
+    $self->_validate_type_object_properties($_[1], $state),
   );
 }
 

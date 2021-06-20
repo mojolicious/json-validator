@@ -91,13 +91,14 @@ sub _resolve_ref {
 }
 
 sub _validate_type_array_contains {
-  my ($self, $data, $path, $schema) = @_;
+  my ($self, $data, $state) = @_;
+  my ($path, $schema) = @$state{qw(path schema)};
   return unless exists $schema->{contains};
   return if defined $schema->{minContains} and $schema->{minContains} == 0;
 
   my ($n_valid, @e, @errors) = (0);
   for my $i (0 .. @$data - 1) {
-    my @tmp = $self->_validate($data->[$i], "$path/$i", $schema->{contains});
+    my @tmp = $self->_validate($data->[$i], $self->_state($state, path => "$path/$i", schema => $schema->{contains}));
     @tmp ? push @e, \@tmp : $n_valid++;
   }
 
@@ -111,27 +112,27 @@ sub _validate_type_array_contains {
 }
 
 sub _validate_type_object_dependencies {
-  my ($self, $data, $path, $schema) = @_;
-  my $dependencies = $schema->{dependentSchemas} || {};
+  my ($self, $data, $state) = @_;
+  my $dependencies = $state->{schema}{dependentSchemas} || {};
   my @errors;
 
   for my $k (keys %$dependencies) {
     next if not exists $data->{$k};
     if (ref $dependencies->{$k} eq 'ARRAY') {
       push @errors,
-        map { E json_pointer($path, $_), [object => dependencies => $k] }
+        map { E json_pointer($state->{path}, $_), [object => dependencies => $k] }
         grep { !exists $data->{$_} } @{$dependencies->{$k}};
     }
     else {
-      push @errors, $self->_validate($data, $path, $dependencies->{$k});
+      push @errors, $self->_validate($data, $self->_state($state, schema => $dependencies->{$k}));
     }
   }
 
-  $dependencies = $schema->{dependentRequired} || {};
+  $dependencies = $state->{schema}{dependentRequired} || {};
   for my $k (keys %$dependencies) {
     next if not exists $data->{$k};
     push @errors,
-      map { E json_pointer($path, $_), [object => dependencies => $k] }
+      map { E json_pointer($state->{path}, $_), [object => dependencies => $k] }
       grep { !exists $data->{$_} } @{$dependencies->{$k}};
   }
 

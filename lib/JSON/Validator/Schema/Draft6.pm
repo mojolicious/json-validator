@@ -30,75 +30,76 @@ sub _build_formats {
 sub _id_key {'$id'}
 
 sub _validate_number_max {
-  my ($self, $value, $path, $schema, $expected) = @_;
+  my ($self, $value, $state, $expected) = @_;
 
-  my $cmp_with = $schema->{maximum};
-  return E $path, [$expected => maximum => $value, $cmp_with] if defined $cmp_with and $value > $cmp_with;
+  my $cmp_with = $state->{schema}{maximum};
+  return E $state->{path}, [$expected => maximum => $value, $cmp_with] if defined $cmp_with and $value > $cmp_with;
 
-  $cmp_with = $schema->{exclusiveMaximum};
-  return E $path, [$expected => ex_maximum => $value, $cmp_with] if defined $cmp_with and $value >= $cmp_with;
+  $cmp_with = $state->{schema}{exclusiveMaximum};
+  return E $state->{path}, [$expected => ex_maximum => $value, $cmp_with] if defined $cmp_with and $value >= $cmp_with;
 
   return;
 }
 
 sub _validate_number_min {
-  my ($self, $value, $path, $schema, $expected) = @_;
+  my ($self, $value, $state, $expected) = @_;
 
-  my $cmp_with = $schema->{minimum};
-  return E $path, [$expected => minimum => $value, $cmp_with] if defined $cmp_with and $value < $cmp_with;
+  my $cmp_with = $state->{schema}{minimum};
+  return E $state->{path}, [$expected => minimum => $value, $cmp_with] if defined $cmp_with and $value < $cmp_with;
 
-  $cmp_with = $schema->{exclusiveMinimum};
-  return E $path, [$expected => ex_minimum => $value, $cmp_with] if defined $cmp_with and $value <= $cmp_with;
+  $cmp_with = $state->{schema}{exclusiveMinimum};
+  return E $state->{path}, [$expected => ex_minimum => $value, $cmp_with] if defined $cmp_with and $value <= $cmp_with;
 
   return;
 }
 
 sub _validate_type_array {
-  my ($self, $data, $path, $schema) = @_;
-  return E $path, [array => type => data_type $data] if ref $data ne 'ARRAY';
+  my ($self, $data, $state) = @_;
+  return E $state->{path}, [array => type => data_type $data] if ref $data ne 'ARRAY';
 
   return (
-    $self->_validate_type_array_min_max($_[1], $path, $schema),
-    $self->_validate_type_array_unique($_[1], $path, $schema),
-    $self->_validate_type_array_contains($_[1], $path, $schema),
-    $self->_validate_type_array_items($_[1], $path, $schema),
+    $self->_validate_type_array_min_max($_[1], $state),
+    $self->_validate_type_array_unique($_[1], $state),
+    $self->_validate_type_array_contains($_[1], $state),
+    $self->_validate_type_array_items($_[1], $state),
   );
 }
 
 sub _validate_type_array_contains {
-  my ($self, $data, $path, $schema) = @_;
-  return unless exists $schema->{contains};
+  my ($self, $data, $state) = @_;
+  return unless exists $state->{schema}{contains};
 
   my (@e, @errors);
   for my $i (0 .. @$data - 1) {
-    my @tmp = $self->_validate($data->[$i], "$path/$i", $schema->{contains});
+    my @tmp = $self->_validate($data->[$i],
+      $self->_state($state, path => "$state->{path}/$i", schema => $state->{schema}{contains}));
     push @e, \@tmp if @tmp;
   }
 
   push @errors, map {@$_} @e if @e >= @$data;
-  push @errors, E $path, [array => 'contains'] if not @$data;
+  push @errors, E $state->{path}, [array => 'contains'] if not @$data;
   return @errors;
 }
 
 sub _validate_type_object {
-  my ($self, $data, $path, $schema) = @_;
-  return E $path, [object => type => data_type $data] if ref $data ne 'HASH';
+  my ($self, $data, $state) = @_;
+  return E $state->{path}, [object => type => data_type $data] if ref $data ne 'HASH';
 
   return (
-    $self->_validate_type_object_min_max($_[1], $path, $schema),
-    $self->_validate_type_object_names($_[1], $path, $schema),
-    $self->_validate_type_object_properties($_[1], $path, $schema),
-    $self->_validate_type_object_dependencies($_[1], $path, $schema),
+    $self->_validate_type_object_min_max($_[1], $state),
+    $self->_validate_type_object_names($_[1], $state),
+    $self->_validate_type_object_properties($_[1], $state),
+    $self->_validate_type_object_dependencies($_[1], $state),
   );
 }
 
 sub _validate_type_object_names {
-  my ($self, $data, $path, $schema) = @_;
-  return unless exists $schema->{propertyNames};
+  my ($self, $data, $state) = @_;
+  return unless exists $state->{schema}{propertyNames};
 
   my @errors;
   for my $name (keys %$data) {
-    next unless my @e = $self->_validate($name, $path, $schema->{propertyNames});
+    next unless my @e = $self->_validate($name, $self->_state($state, schema => $state->{schema}{propertyNames}));
     push @errors, prefix_errors propertyName => map [$name, $_], @e;
   }
 
