@@ -3,16 +3,19 @@ use Mojo::Base -base;
 
 use Mojo::Exception;
 use Mojo::File qw(path);
-use Mojo::JSON;
 use Mojo::UserAgent;
 use Mojo::Util qw(url_unescape);
 use JSON::Validator::Schema;
-use JSON::Validator::Util qw(data_section);
+use JSON::Validator::URI qw(uri);
+use JSON::Validator::Util qw(data_section urn);
 
+use constant DEBUG         => $ENV{JSON_VALIDATOR_DEBUG} && 1;
 use constant BUNDLED_PATH  => path(path(__FILE__)->dirname, 'cache')->to_string;
 use constant CASE_TOLERANT => File::Spec->case_tolerant;
 
 die $@ unless eval q(package JSON::Validator::Exception; use Mojo::Base 'Mojo::Exception'; 1);
+
+our $LOAD_ERR_FMT = qq(Unable to load schema "%s".);
 
 has cache_paths => sub { [split(/:/, $ENV{JSON_VALIDATOR_CACHE_PATH} || ''), BUNDLED_PATH] };
 has schemas     => sub { +{} };
@@ -52,7 +55,58 @@ sub load {
     || $_[0]->_load_from_file($_[1])
     || $_[0]->_load_from_app($_[1])
     || $_[0]->get($_[1])
-    || _raise("Unable to load schema $_[1]");
+    || _raise(sprintf $LOAD_ERR_FMT, $_[1]);
+}
+
+sub resolve {
+  my ($self, $ref, $curr) = @_;
+  $curr //= {base_url => ''};
+
+  my ($base_url, $fragment) = split '#', $ref;
+  my $abs_url = uri($base_url)->fragment($fragment);
+  $abs_url  = uri $abs_url, $curr->{base_url} if $curr->{base_url} and !$abs_url->is_abs;
+  $fragment = '' unless defined $fragment;
+
+  warn "[JSON::Validator] Resolve curr: @{[map qq($_=$curr->{$_}), sort keys %$curr]}\n" if DEBUG;
+
+  my $state = {base_url => $base_url, fragment => $fragment, source => 'unknown'};
+  if (defined(my $schema = $self->schemas->{$abs_url})) {
+    @$state{qw(base_url id root schema source)} = ("$abs_url", "$abs_url", $schema, $schema, 'schema/abs_url');
+  }
+  elsif (defined(my $root = $self->schemas->{$base_url})) {
+    @$state{qw(id root source)} = ($base_url, $root, 'schema/base_url');
+  }
+  elsif ($base_url) {
+    $base_url = uri $base_url, $curr->{base_url} if $curr->{base_url};
+    local $LOAD_ERR_FMT = qq(Unable to load schema "%s" from "$curr->{base_url}".);
+    my $id = $self->load("$base_url");
+    @$state{qw(base_url id root source)} = ($id, $id, $self->get($id), 'load');
+    $state->{root} = $self->get($id);
+  }
+  else {
+    @$state{qw(id root source)} = ('', $curr->{root}, 'root');
+  }
+
+  $state->{schema} //= length $fragment ? Mojo::JSON::Pointer->new($state->{root})->get($fragment) : $state->{root};
+  warn "[JSON::Validator] Resolve state: @{[map qq($_=$state->{$_}), sort keys %$state]}\n" if DEBUG;
+  _raise(qq[Unable to resolve "$ref" from "$state->{base_url}". ($state->{source})]) unless defined $state->{schema};
+
+  $state->{$_} //= $curr->{$_} for keys %$curr;    # pass on original information
+  return $state;
+}
+
+sub _add {
+  my ($self, $id, $schema) = @_;
+  $id = $self->add($id => $schema);
+
+  if (ref $schema eq 'HASH') {
+    return
+        $schema->{'$id'} ? $self->add($schema->{'$id'} => $schema)
+      : $schema->{id}    ? $self->add($schema->{id} => $schema)
+      :                    $id;
+  }
+
+  return $id;
 }
 
 sub _load_from_app {
@@ -65,8 +119,9 @@ sub _load_from_app {
 
   my $tx  = $self->ua->get($url);
   my $err = $tx->error && $tx->error->{message};
-  _raise($err) if $err;
-  return $self->add($url => _parse($tx->res->body));
+  _raise("GET $url: $err")                      if $err;
+  warn "[JSON::Validator] Load from app $url\n" if DEBUG;
+  return $self->_add($url => _parse($tx->res->body));
 }
 
 sub _load_from_data {
@@ -79,7 +134,8 @@ sub _load_from_data {
   my ($class, $file) = ($1, $2);    # data://([^/]*)/(.*)
   my $text = data_section $class, $file, {encoding => 'UTF-8'};
   _raise("Could not find $url") unless $text;
-  return $self->add($url => _parse($text));
+  warn "[JSON::Validator] Load from data $file in $class\n" if DEBUG;
+  return $self->_add($url => _parse($text));
 }
 
 sub _load_from_file {
@@ -91,8 +147,9 @@ sub _load_from_file {
   return undef unless -e $file;
 
   $file = $file->realpath;
-  my $id = Mojo::URL->new->scheme('file')->host('')->path(CASE_TOLERANT ? lc $file : "$file");
-  return $self->exists($id) || $self->add($id => _parse($file->slurp));
+  my $id = uri()->new->scheme('file')->host('')->path(CASE_TOLERANT ? lc $file : "$file");
+  warn "[JSON::Validator] Load from file $file\n" if DEBUG;
+  return $self->exists($id) || $self->_add($id => _parse($file->slurp));
 }
 
 sub _load_from_text {
@@ -100,8 +157,9 @@ sub _load_from_text {
   my $is_scalar_ref = ref $text eq 'SCALAR';
   return undef unless $is_scalar_ref or $text =~ m!^\s*(?:---|\{)!s;
 
-  my $id = sprintf 'urn:text:%s', Mojo::Util::md5_sum($is_scalar_ref ? $$text : $text);
-  return $self->exists($id) || $self->add($id => _parse($is_scalar_ref ? $$text : $text));
+  my $id = urn $is_scalar_ref ? $$text : $text;
+  warn "[JSON::Validator] Load from text $id\n" if DEBUG;
+  return $self->exists($id) || $self->_add($id => _parse($is_scalar_ref ? $$text : $text));
 }
 
 sub _load_from_url {
@@ -111,26 +169,28 @@ sub _load_from_url {
   my $id;
   return $id if $id = $self->exists($url);
 
-  $url = Mojo::URL->new($url)->fragment(undef);
+  $url = uri($url)->fragment(undef);
   return $id if $id = $self->exists($url);
 
   my $cache_path = $self->cache_paths->[0];
   my $cache_file = Mojo::Util::md5_sum("$url");
   for (@{$self->cache_paths}) {
     my $path = path $_, $cache_file;
-    return $self->add($url => _parse($path->slurp)) if -r $path;
+    warn "[JSON::Validator] Load from cache $path\n" if DEBUG and -r $path;
+    return $self->_add($url => _parse($path->slurp)) if -r $path;
   }
 
   my $tx  = $self->ua->get($url);
   my $err = $tx->error && $tx->error->{message};
-  _raise($err) if $err;
+  _raise("GET $url: $err") if $err;
 
   if ($cache_path and $cache_path ne BUNDLED_PATH and -w $cache_path) {
     $cache_file = path $cache_path, $cache_file;
     $cache_file->spurt($tx->res->body);
   }
 
-  return $self->add($url => _parse($tx->res->body));
+  warn "[JSON::Validator] Load from URL $url\n" if DEBUG;
+  return $self->_add($url => _parse($tx->res->body));
 }
 
 sub _parse {
@@ -239,6 +299,23 @@ Loading can also be done with relative path, which will then load from:
   $store->ua->server->app;
 
 This method is EXPERIMENTAL, but unlikely to change significantly.
+
+=head2 resolve
+
+  $hash_ref = $store->resolve($url, \%defaults);
+
+Takes a C<$url> (can also be a file, urn, ...) with or without a fragment and
+returns this structure about the schema:
+
+  {
+    base_url => $str,  # the part before the fragment in the $url
+    fragment => $str,  # fragment part of the $url
+    id       => $str,  # store ID
+    root     => ...,   # the root schema
+    schema   => ...,   # the schema inside "root" if fragment is present
+  }
+
+This method is EXPERIMENTAL and can change without warning.
 
 =head1 SEE ALSO
 
