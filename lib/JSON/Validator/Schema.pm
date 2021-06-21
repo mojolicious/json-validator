@@ -60,9 +60,11 @@ sub data {
 }
 
 sub get {
-  state $p = Mojo::JSON::Pointer->new;
-  return $p->data(shift->{data})->get(@_) if @_ == 2 and ref $_[1] ne 'ARRAY';
-  return JSON::Validator::Util::schema_extract(shift->data, @_);
+  my ($self, $pointer, $cb) = @_;
+  my %state = (data => $self->data, pos => '');
+  return $self->_get([@$pointer], \%state, $cb) if is_type $pointer, 'ARRAY';
+  return $self->_get([split '/', $pointer], \%state, $cb) if $pointer =~ s!^/!!;
+  return length $pointer ? undef : $self->data;
 }
 
 sub is_invalid { !!@{shift->errors} }
@@ -120,6 +122,44 @@ sub _build_formats {
 }
 
 sub _definitions_path_for_ref { ['definitions'] }
+
+sub _get {
+  my ($self, $pointer, $state, $cb) = @_;
+  my $data = $state->{data};
+
+  while (@$pointer) {
+    my $p = shift @$pointer;
+
+    unless (defined $p) {
+      my $i = 0;
+      return Mojo::Collection->new(
+        map { $self->_get([@$pointer], {data => $_->[0], pos => json_pointer($state->{pos}, $_->[1])}, $cb) }
+          ref $data eq 'ARRAY' ? (map { [$_, $i++] } @$data)
+        : ref $data eq 'HASH' ? (map { [$data->{$_}, $_] } sort keys %$data)
+        :                       ([$data, '']));
+    }
+
+    $p =~ s!~1!/!g;
+    $p =~ s/~0/~/g;
+    $state->{pos} = json_pointer $state->{pos}, $p;
+
+    if (ref $data eq 'HASH' and exists $data->{$p}) {
+      $data = $data->{$p};
+    }
+    elsif (ref $data eq 'ARRAY' and $p =~ /^\d+$/ and @$data > $p) {
+      $data = $data->[$p];
+    }
+    else {
+      return undef;
+    }
+
+    my ($continue, $tied) = (@$pointer && $pointer->[0] ne '$ref');
+    $data = $tied->schema while $continue and ref $data eq 'HASH' and $tied = tied %$data;
+  }
+
+  return $cb->($data, $state->{pos}) if $cb;
+  return $data;
+}
 
 sub _id_key {'id'}
 
@@ -751,18 +791,22 @@ use L</resolve> instead of L</data>.
 
 =head2 get
 
+  my $data = $schema->get([@json_pointer]);
   my $data = $schema->get($json_pointer);
   my $data = $schema->get($json_pointer, sub { my ($data, $json_pointer) = @_; });
 
-Called with one argument, this method acts like L<Mojo::JSON::Pointer/get>,
-while if called with two arguments it will work like
-L<JSON::Validator::Util/schema_extract> instead:
+This method will extract data from L</data>, using a C<$json_pointer> -
+L<RFC 6901|http://tools.ietf.org/html/rfc6901>. It can however be used in a more
+complex way by passing in an array-ref: The array-ref can contain C<undef()>
+values, will result in extracting any element on that point, regardsless of
+value. In that case a L<Mojo::Collection> will be returned.
 
-  JSON::Validator::Util::schema_extract($schema->data, sub { ... });
+A callback can also be given. This callback will be called each time the
+C<$json_pointer> matches some data, and will pass in the C<$json_pointer> at
+that place.
 
-The second argument can be C<undef()>, if you don't care about the callback.
-
-See L<Mojo::JSON::Pointer/get>.
+In addition if this method "sees" a JSON-Schema C<$ref> on the way, the "$ref"
+will be followed into any given sub schema.
 
 =head2 is_invalid
 
