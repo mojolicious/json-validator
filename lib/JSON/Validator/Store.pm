@@ -58,7 +58,8 @@ sub load {
 sub _load_from_app {
   return undef unless $_[1] =~ m!^/!;
 
-  my ($self, $url, $id) = @_;
+  my ($self, $url) = @_;
+  my $id;
   return undef unless $self->ua->server->app;
   return $id if $id = $self->exists($url);
 
@@ -71,7 +72,8 @@ sub _load_from_app {
 sub _load_from_data {
   return undef unless $_[1] =~ m!^data://([^/]*)/(.*)!;
 
-  my ($self, $url, $id) = @_;
+  my ($self, $url) = @_;
+  my $id;
   return $id if $id = $self->exists($url);
 
   my ($class, $file) = ($1, $2);    # data://([^/]*)/(.*)
@@ -105,7 +107,8 @@ sub _load_from_text {
 sub _load_from_url {
   return undef unless $_[1] =~ m!^https?://!;
 
-  my ($self, $url, $id) = @_;
+  my ($self, $url) = @_;
+  my $id;
   return $id if $id = $self->exists($url);
 
   $url = Mojo::URL->new($url)->fragment(undef);
