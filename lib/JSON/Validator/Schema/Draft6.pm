@@ -2,6 +2,7 @@ package JSON::Validator::Schema::Draft6;
 use Mojo::Base 'JSON::Validator::Schema';
 
 use JSON::Validator::Schema::Draft4;
+use JSON::Validator::URI qw(uri);
 use JSON::Validator::Util qw(E data_type is_type prefix_errors);
 
 has id => sub {
@@ -27,7 +28,21 @@ sub _build_formats {
   };
 }
 
-sub _id_key {'$id'}
+sub _resolve_object {
+  my ($self, $state, $schema, $refs, $found) = @_;
+
+  if ($schema->{'$id'} and !ref $schema->{'$id'}) {
+    my $id = uri $schema->{'$id'}, $state->{base_url};
+    $self->store->add($id => $schema);
+    $state = {%$state, base_url => $id->fragment(undef)->to_string};
+  }
+
+  if ($found->{'$ref'} = $schema->{'$ref'} && !ref $schema->{'$ref'}) {
+    push @$refs, [$schema, $state];
+  }
+
+  return $state;
+}
 
 sub _validate_number_max {
   my ($self, $value, $state, $expected) = @_;

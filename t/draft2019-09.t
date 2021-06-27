@@ -19,19 +19,20 @@ t::Helper->test(object => qw(dependent_required dependent_schemas unevaluated_pr
 
 subtest 'anchor' => sub {
   $schema->data({'$ref' => '#foo', '$defs' => {'A' => {'$anchor' => 'foo', 'type' => 'integer'}}})->resolve;
-  is $schema->data->{type}, 'integer', 'foo anchor type';
+  is $schema->get('/type'), 'integer', 'foo anchor type';
 };
 
 subtest 'recursiveRef, without recursiveAnchor' => sub {
   my $jv = JSON::Validator->new->schema('data://main/tree.json');
   $jv->schema('data://main/recursiveRef.json');
   isa_ok $jv->schema, 'JSON::Validator::Schema::Draft201909';
-  is $jv->schema->data->{type}, 'object', 'recursiveRef type';
-  is $jv->schema->data->{properties}{data}, true, 'recursiveRef properties data';
-  is $jv->schema->data->{properties}{children}{items}{type}, 'object', 'recursiveRef properties data items';
-  is $jv->schema->data->{properties}{children}{items}{properties}{children}{items}{type}, 'object', 'recursive';
+  is $jv->schema->get('/type'),                           'object', 'recursiveRef type';
+  is $jv->schema->get('/properties/data'),                true, 'recursiveRef properties data';
+  is $jv->schema->get('/properties/children/items/type'), 'object', 'recursiveRef properties data items';
+  is $jv->schema->get('/properties/children/items/properties/children/items/type'), 'object', 'recursive';
   is_deeply [sort keys %{$jv->store->schemas}],
-    [qw(data://main/recursiveRef.json data://main/tree.json urn:recursiveRef urn:tree)], 'schemas in the store';
+    [qw(data://main/recursiveRef.json data://main/tree.json urn:x-test:recursiveRef urn:x-test:tree)],
+    'schemas in the store';
 };
 
 subtest 'test caching' => sub {
@@ -46,7 +47,7 @@ __DATA__
 @@ tree.json
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
-  "$id": "urn:tree",
+  "$id": "urn:x-test:tree",
   "type": "object",
   "properties": {
     "data": true,
@@ -59,6 +60,6 @@ __DATA__
 @@ recursiveRef.json
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
-  "$id": "urn:recursiveRef",
-  "$ref": "urn:tree"
+  "$id": "urn:x-test:recursiveRef",
+  "$ref": "urn:x-test:tree"
 }

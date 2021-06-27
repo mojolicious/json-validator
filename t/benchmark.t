@@ -21,9 +21,9 @@ sub time_schema {
   my ($desc, $attrs) = @_;
   my (@errors, @resolve_t, @validate_t, @total_t);
 
-  my $resolve_before  = delete $attrs->{resolve_before};
-  my $resolved_schema = $resolve_before
-    && JSON::Validator::Schema::Draft7->new(%$attrs)->resolve('http://json-schema.org/draft-07/schema#');
+  my $resolve_before = delete $attrs->{resolve_before};
+  my $resolved_schema
+    = $resolve_before && JSON::Validator::Schema::Draft7->new('http://json-schema.org/draft-07/schema#', %$attrs);
 
   $bm{$desc} = timeit 1 => sub {
     for (1 ... $n) {
@@ -31,7 +31,7 @@ sub time_schema {
 
       my $t0 = time;
       delete $schema->{errors};
-      $schema->resolve('http://json-schema.org/draft-07/schema#') unless $resolve_before;
+      $schema->data('http://json-schema.org/draft-07/schema#')->resolve unless $resolve_before;
       push @resolve_t, (my $t1 = time) - $t0;
 
       push @errors, @{$schema->errors};
@@ -43,30 +43,39 @@ sub time_schema {
 
   ok !@errors, 'valid schema' or diag "@errors";
 
-  my $rt = sum @resolve_t;
+  my $rt = sprintf '%.3f', sum @resolve_t;
   ok $rt < 2, "$desc - resolve ${rt}s" unless $resolve_before;
 
-  my $vt = sum @validate_t;
+  my $vt = sprintf '%.3f', sum @validate_t;
   ok $vt < 2, "$desc - validate ${vt}s";
 
-  my $tt = sum @total_t;
+  my $tt = sprintf '%.3f', sum @total_t;
   ok $tt < 2, "$desc - total ${tt}s";
 }
 
 __DATA__
-# Mon Jun 21 14:28:40 2021
+# Sun Jul  4 11:38:21 2021
 # n_times=200
 
 ok 1 - valid schema
-ok 2 - defaults - resolve 1.20338559150696s
-ok 3 - defaults - validate 1.76539778709412s
-not ok 4 - defaults - total 2.96878337860107s
+ok 2 - defaults - resolve 0.581s
+not ok 3 - defaults - validate 3.126s
+not ok 4 - defaults - total 3.707s
 
-#   Failed test 'defaults - total 2.96878337860107s'
+#   Failed test 'defaults - validate 3.126s'
+#   at t/benchmark.t line 50.
+
+#   Failed test 'defaults - total 3.707s'
 #   at t/benchmark.t line 53.
 ok 5 - valid schema
-ok 6 - resolve_before - validate 1.6137535572052s
-ok 7 - resolve_before - total 1.61384391784668s
+not ok 6 - resolve_before - validate 3.148s
+
+#   Failed test 'resolve_before - validate 3.148s'
+#   at t/benchmark.t line 50.
+not ok 7 - resolve_before - total 3.148s
+
+#   Failed test 'resolve_before - total 3.148s'
+#   at t/benchmark.t line 53.
                s/iter       defaults resolve_before
-defaults         2.96             --           -46%
-resolve_before   1.61            84%             --
+defaults         3.71             --           -15%
+resolve_before   3.14            18%             --

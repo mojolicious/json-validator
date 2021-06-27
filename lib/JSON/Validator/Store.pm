@@ -15,8 +15,6 @@ use constant CASE_TOLERANT => File::Spec->case_tolerant;
 
 die $@ unless eval q(package JSON::Validator::Exception; use Mojo::Base 'Mojo::Exception'; 1);
 
-our $LOAD_ERR_FMT = qq(Unable to load schema "%s".);
-
 has cache_paths => sub { [split(/:/, $ENV{JSON_VALIDATOR_CACHE_PATH} || ''), BUNDLED_PATH] };
 has schemas     => sub { +{} };
 
@@ -55,7 +53,7 @@ sub load {
     || $_[0]->_load_from_file($_[1])
     || $_[0]->_load_from_app($_[1])
     || $_[0]->get($_[1])
-    || _raise(sprintf $LOAD_ERR_FMT, $_[1]);
+    || _raise(qq(Unable to load schema "$_[1]".));
 }
 
 sub resolve {
@@ -78,7 +76,6 @@ sub resolve {
   }
   elsif ($base_url) {
     $base_url = uri $base_url, $curr->{base_url} if $curr->{base_url};
-    local $LOAD_ERR_FMT = qq(Unable to load schema "%s" from "$curr->{base_url}".);
     my $id = $self->load("$base_url");
     @$state{qw(base_url id root source)} = ($id, $id, $self->get($id), 'load');
     $state->{root} = $self->get($id);
@@ -87,11 +84,14 @@ sub resolve {
     @$state{qw(id root source)} = ('', $curr->{root}, 'root');
   }
 
+  $fragment =~ s!%2f!~1!;    # /
+  $fragment =~ s!%7e!~0!;    # ~
+  $fragment = url_unescape $fragment;
   $state->{schema} //= length $fragment ? Mojo::JSON::Pointer->new($state->{root})->get($fragment) : $state->{root};
-  warn "[JSON::Validator] Resolve state: @{[map qq($_=$state->{$_}), sort keys %$state]}\n" if DEBUG;
   _raise(qq[Unable to resolve "$ref" from "$state->{base_url}". ($state->{source})]) unless defined $state->{schema};
 
   $state->{$_} //= $curr->{$_} for keys %$curr;    # pass on original information
+  warn "[JSON::Validator] Resolve state: @{[map qq($_=$state->{$_}), sort keys %$state]}\n" if DEBUG;
   return $state;
 }
 

@@ -17,7 +17,6 @@ $t->get_ok('/relative-to-the-root.json')->status_is(200);
 
 $base_url = $t->tx->req->url->to_abs->path('/');
 like $base_url, qr{^http}, 'got base_url to web server';
-is $jv->_id_key, 'id', 'default id_key';
 
 eval { $jv->load_and_validate_schema("${base_url}relative-to-the-root.json") };
 ok !$@, "${base_url}relative-to-the-root.json" or diag $@;
@@ -36,16 +35,12 @@ is $schema->get('/definitions/C/definitions/Y/id'), '#cy', 'id /definitions/C/de
 
 my $r1 = $schema->get('/definitions/R1');
 is encode_json($r1), '{"$ref":"b.json#bx"}', 'R1 encode_json';
-$r1 = tied %$r1;
-is $r1->ref, 'b.json#bx',                    'R1 ref';
-is $r1->fqn, 'http://example.com/b.json#bx', 'R1 fqn';
-is_deeply $r1->schema, {id => '#bx'}, 'R1 schema';
 
 eval { $jv->load_and_validate_schema("${base_url}invalid-fragment.json") };
-like $@, qr{cannot have a fragment}, 'Root id cannot have a fragment' or diag $@;
+like $@, qr{Fragment not allowed}, 'Root id cannot have a fragment' or diag $@;
 
 eval { $jv->load_and_validate_schema("${base_url}invalid-relative.json") };
-like $@, qr{cannot have a relative}, 'Root id cannot be relative' or diag $@;
+like $@, qr{Relative URL not allowed}, 'Root id cannot be relative' or diag $@;
 
 done_testing;
 

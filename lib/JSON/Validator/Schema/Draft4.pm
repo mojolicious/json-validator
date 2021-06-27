@@ -164,11 +164,7 @@ sub _validate_type_object_properties {
   my @dkeys = keys %$data;
 
   for my $k (keys %{$schema->{properties} || {}}) {
-    my $r = $schema->{properties}{$k};
-    push @{$rules{$k}}, $r;
-    if ($self->{coerce}{defaults} and ref $r eq 'HASH' and exists $r->{default} and !exists $data->{$k}) {
-      $data->{$k} = $r->{default};
-    }
+    push @{$rules{$k}}, $schema->{properties}{$k};
   }
 
   for my $p (keys %{$schema->{patternProperties} || {}}) {
@@ -192,11 +188,17 @@ sub _validate_type_object_properties {
     delete $rules{$k};
   }
 
+  my $defaults = $self->{coerce}{defaults};
   for my $k (keys %rules) {
     for my $r (@{$rules{$k}}) {
-      next unless exists $data->{$k};
       my $s2 = $self->_state($state, path => json_pointer($path, $k), schema => $r);
-      my @e  = $self->_validate($data->{$k}, $s2);
+      if ($defaults and ref $s2->{schema} eq 'HASH' and exists $s2->{schema}{default} and !exists $data->{$k}) {
+        $data->{$k} = $s2->{schema}{default};
+      }
+
+      next unless exists $data->{$k};
+
+      my @e = $self->_validate($data->{$k}, $s2);
       push @errors, @e;
       next if @e or !is_type $r, 'HASH';
       push @errors, $self->_validate_type_enum($data->{$k}, $s2)  if $r->{enum};

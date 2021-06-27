@@ -10,12 +10,6 @@ my $X_RE = qr{^x-};
 # Some of the keywords are OpenAPIv3 keywords
 my %SKIP_KEYWORDS_IN_PATH = map { ($_, 1) } qw(description parameters servers summary);
 
-has errors => sub {
-  my $self      = shift;
-  my $validator = $self->new(%$self)->resolve($self->specification);
-  return [$validator->validate($self->resolve->data)];
-};
-
 has moniker       => 'openapiv2';
 has specification => 'http://swagger.io/v2/schema.json';
 
@@ -188,6 +182,12 @@ sub _build_formats {
   };
 }
 
+sub _bundle_ref_path {
+  my ($self, $ref, @args) = @_;
+  my $base = $ref =~ m!^.*#/(definitions|parameters|responses/.+)$! ? $1 : 'definitions';
+  return ($base, $self->_flatten_ref($ref, @args));
+}
+
 sub _coerce_arrays {
   my ($self, $val, $param) = @_;
   my $data_type   = data_type $val->{value};
@@ -236,12 +236,6 @@ sub _default_response_schema {
   };
 }
 
-sub _definitions_path_for_ref {
-  my ($self, $ref) = @_;
-  my $path = Mojo::Path->new($ref->fqn =~ m!^.*#/(definitions|parameters|responses/.+)$!)->to_dir->parts;
-  return $path->[0] ? $path : ['definitions'];
-}
-
 sub _find_all_nodes {
   my ($self, $pointer, $leaf) = @_;
   my @found;
@@ -264,6 +258,8 @@ sub _get_parameter_value {
   return $val;
 }
 
+sub _normalize_ref { $_[1]->{'$ref'} =~ /^\w+$/ ? "#/definitions/$_[1]->{'$ref'}" : $_[1]->{'$ref'} }
+
 sub _params_for_add_default_response {
   my $self   = shift;
   my $params = shift || {};
@@ -278,12 +274,6 @@ sub _params_for_add_default_response {
 
 sub _prefix_error_path {
   return join '', "/$_[0]", $_[1] =~ /\w/ ? ($_[1]) : ();
-}
-
-sub _resolve_ref {
-  my ($self, $ref_url, $base_url, $root) = @_;
-  $ref_url = "#/definitions/$ref_url" if $ref_url =~ /^\w+$/;
-  return $self->SUPER::_resolve_ref($ref_url, $base_url, $root);
 }
 
 sub _validate_body {
@@ -314,6 +304,8 @@ sub _validate_body {
 
   return;
 }
+
+sub _validate_id { }
 
 sub _validate_request_or_response {
   my ($self, $direction, $parameters, $get) = @_;
@@ -369,10 +361,11 @@ sub _validate_type_object {
   local $schema->{required} = [grep { !$ro{$_} } @{$schema->{required} || []}];
 
   my $discriminator = $schema->{discriminator};
-  if ($discriminator and !$state->{inside_discriminator}) {
-    return E $path, "Discriminator $discriminator has no value." unless my $name    = $data->{$discriminator};
-    return E $path, "No definition for discriminator $name."     unless my $dschema = $self->get("/definitions/$name");
-    return $self->_validate($data, $self->_state($state, inside_discriminator => 1, schema => $dschema));
+  if ($discriminator and !$self->{inside_discriminator}) {
+    return E $path, "Discriminator $discriminator has no value." unless my $name = $data->{$discriminator};
+    return E $path, "No definition for discriminator $name."     unless my $ds   = $self->get("/definitions/$name");
+    local $self->{inside_discriminator} = 1;
+    return $self->_validate($data, $self->_state($state, schema => $ds));
   }
 
   return (

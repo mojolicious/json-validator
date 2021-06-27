@@ -2,13 +2,10 @@ package JSON::Validator;
 use Mojo::Base -base;
 
 use Carp qw(confess);
-use JSON::Validator::Ref;
 use JSON::Validator::Store;
-use JSON::Validator::Util qw(E data_checksum is_bool is_type);
-use Mojo::File qw(path);
-use Mojo::URL;
-use Mojo::Util qw(monkey_patch sha1_sum);
-use Scalar::Util qw(blessed refaddr);
+use JSON::Validator::Util qw(E data_checksum is_type);
+use Mojo::Util qw(sha1_sum);
+use Scalar::Util qw(blessed);
 
 our $VERSION = '4.20';
 
@@ -36,59 +33,7 @@ for my $method (qw(cache_paths ua)) {
   Mojo::Util::monkey_patch(__PACKAGE__, $method => sub { shift->store->$method(@_) });
 }
 
-sub bundle {
-  my ($self, $args) = @_;
-
-  my $get_data  = $self->can('data') ? 'data' : 'schema';
-  my $schema    = $self->_new_schema($args->{schema} || $self->$get_data);
-  my $schema_id = $schema->id;
-  my @topics    = ([$schema->data, my $bundle = {}]);                        # ([$from, $to], ...);
-
-  my $cloner = sub {
-    my $from      = shift;
-    my $from_type = ref $from;
-    my $tied      = $from_type eq 'HASH' && tied %$from;
-
-    unless ($tied) {
-      my $to = $from_type eq 'ARRAY' ? [] : $from_type eq 'HASH' ? {} : $from;
-      push @topics, [$from, $to] if $from_type;
-      return $to;
-    }
-
-    # Traverse all $ref
-    while (my $tmp = tied %{$tied->schema}) { $tied = $tmp }
-
-    return $from if !$args->{schema} and $tied->fqn =~ m!^\Q$schema_id\E\#!;
-
-    my $path = $self->_definitions_path($bundle, $tied);
-    unless ($self->{bundled_refs}{$tied->fqn}++) {
-      push @topics, [_node($schema->data, $path, 1, 0) || {}, _node($bundle, $path, 1, 1)];
-      push @topics, [$tied->schema, _node($bundle, $path, 0, 1)];
-    }
-
-    $path = join '/', '#', @$path;
-    tie my %ref, 'JSON::Validator::Ref', $tied->schema, $path;
-    return \%ref;
-  };
-
-  local $self->{bundled_refs} = {};
-
-  while (@topics) {
-    my ($from, $to) = @{shift @topics};
-    if (ref $from eq 'ARRAY') {
-      for (my $i = 0; $i < @$from; $i++) {
-        $to->[$i] = $cloner->($from->[$i]);
-      }
-    }
-    elsif (ref $from eq 'HASH') {
-      for my $key (keys %$from) {
-        $to->{$key} //= $cloner->($from->{$key});
-      }
-    }
-  }
-
-  return $bundle;
-}
+sub bundle { shift->schema->bundle(@_) }
 
 sub coerce {
   my $self = shift;
@@ -135,86 +80,6 @@ sub validate {
   return +(defined $schema ? $self->_new_schema($schema) : $self->schema)->validate($_[1]);
 }
 
-sub _definitions_path {
-  my ($self, $bundle, $ref) = @_;
-  my $path = $self->_definitions_path_for_ref($ref);
-
-  # No need to rewrite, if it already has a nice name
-  my $node   = _node($bundle, $path, 2, 0);
-  my $prefix = join '/', @$path;
-  if ($ref->fqn =~ m!#/$prefix/([^/]+)$!) {
-    my $key = $1;
-
-    if ( $self->{bundled_refs}{$ref->fqn}
-      or !$node
-      or !$node->{$key}
-      or data_checksum($ref->schema) eq data_checksum($node->{$key}))
-    {
-      return [@$path, $key];
-    }
-  }
-
-  # Generate definitions key based on filename
-  my $fqn = Mojo::URL->new($ref->fqn);
-  my $key = $fqn->fragment;
-  if ($fqn->scheme and $fqn->scheme eq 'file') {
-    $key = join '-', map { s!^\W+!!; $_ } grep {$_} path($fqn->path)->basename, $key,
-      substr(sha1_sum($fqn->path), 0, 10);
-  }
-
-  # Fallback or nicer path name
-  $key =~ s![^\w-]!_!g;
-  return [@$path, $key];
-}
-
-sub _definitions_path_for_ref { ['definitions'] }
-
-sub _find_and_resolve_refs {
-  my ($self, $base_url, $schema) = @_;
-  my %root = is_type($schema, 'HASH') ? %$schema : ();
-
-  my ($id_key, @topics, @refs, %seen) = ($self->_id_key, [$base_url, $schema]);
-  while (@topics) {
-    my ($base_url, $topic) = @{shift @topics};
-
-    if (is_type $topic, 'ARRAY') {
-      push @topics, map { [$base_url, $_] } @$topic;
-    }
-    elsif (is_type $topic, 'HASH') {
-      next if $seen{refaddr($topic)}++;
-
-      my $base_url = $base_url;    # do not change the global $base_url
-      if ($topic->{$id_key} and !ref $topic->{$id_key}) {
-        my $id = Mojo::URL->new($topic->{$id_key});
-        $id = $id->to_abs($base_url) unless $id->is_abs;
-        $self->store->add($id => $topic);
-        $base_url = $id;
-      }
-
-      my $has_ref = $topic->{'$ref'} && !ref $topic->{'$ref'} && !tied %$topic ? 1 : 0;
-      push @refs, [$base_url, $topic] if $has_ref;
-
-      for my $key (keys %$topic) {
-        next unless ref $topic->{$key};
-        next if $has_ref and $key eq '$ref';
-        push @topics, [$base_url, $topic->{$key}];
-      }
-    }
-  }
-
-  while (@refs) {
-    my ($base_url, $topic) = @{shift @refs};
-    next if is_bool $topic;
-    next if !$topic->{'$ref'} or ref $topic->{'$ref'};
-    my $base = Mojo::URL->new($base_url || $base_url)->fragment(undef);
-    my ($other, $ref_url, $fqn) = $self->_resolve_ref($topic->{'$ref'}, $base, \%root);
-    tie %$topic, 'JSON::Validator::Ref', $other, "$ref_url", "$fqn";
-    push @refs, [$other, $fqn];
-  }
-}
-
-sub _id_key { $_[0]->schema ? $_[0]->schema->_id_key : 'id' }
-
 sub _new_schema {
   my ($self, $source, %attrs) = @_;
   return $source if blessed $source and $source->can('specification');
@@ -255,76 +120,6 @@ sub _new_schema {
   $schema_class =~ s!^\+(.+)$!JSON::Validator::Schema::$1!;
   confess "Could not load $schema_class: $@" unless $schema_class->can('new') or eval "require $schema_class;1";
   return $schema_class->new($source, %attrs);
-}
-
-sub _node {
-  my ($node, $path, $offset, $create) = @_;
-
-  my $n = 0;
-  while ($path->[$n]) {
-    $node->{$path->[$n]} ||= {} if $create;
-    return undef unless $node = $node->{$path->[$n]};
-    last if (++$n) + $offset >= @$path;
-  }
-
-  return $node;
-}
-
-sub _register_root_schema {
-  my ($self, $id, $schema) = @_;
-  confess "Root schema cannot have a fragment in the 'id'. ($id)" if $id =~ /\#./;
-  confess "Root schema cannot have a relative 'id'. ($id)" unless $id =~ /^\w+:/ or -e $id or $id =~ m!^/!;
-}
-
-# _resolve() method is used to convert all "id" into absolute URLs and
-# resolve all the $ref's that we find inside JSON Schema specification.
-sub _resolve {
-  my ($self, $schema, $nested) = @_;
-  return $schema if is_bool $schema;
-
-  my ($id_key, $id, $cached_id, $resolved) = ($self->_id_key);
-  if (ref $schema eq 'HASH') {
-    $id        = $schema->{$id_key} // '';
-    $cached_id = $self->store->exists($id);
-    $resolved  = $cached_id ? $self->store->get($cached_id) : $schema;
-  }
-  else {
-    $cached_id = $self->store->exists($id);
-    $id        = $cached_id // $self->store->load($schema);
-    $resolved  = $self->store->get($id);
-    $id        = $resolved->{$id_key} if is_type($resolved, 'HASH') and $resolved->{$id_key};
-  }
-
-  $cached_id //= '';
-  $id = Mojo::URL->new("$id");
-  $self->_register_root_schema($id => $resolved) if !$nested and "$id";
-  $self->store->add($id => $resolved)            if "$id"    and "$id" ne $cached_id;
-  $self->_find_and_resolve_refs($id => $resolved) unless $cached_id;
-
-  return $resolved;
-}
-
-sub _resolve_ref {
-  my ($self, $ref_url, $base_url, $schema) = @_;
-  $ref_url = "#$ref_url" if $ref_url =~ m!^/!;
-
-  my $fqn     = Mojo::URL->new($ref_url);
-  my $pointer = $fqn->fragment;
-  my $other;
-
-  $fqn = $fqn->to_abs($base_url) if "$base_url";
-  $other //= $self->store->get($fqn);
-  $other //= $self->store->get($fqn->clone->fragment(undef));
-  $other //= $self->_resolve($fqn->clone->fragment(undef), 1) if $fqn->is_abs && $fqn ne $base_url;
-  $other //= $schema;
-
-  if (defined $pointer and $pointer =~ m!^/!) {
-    $other = Mojo::JSON::Pointer->new($other)->get($pointer);
-    confess qq[Possibly a typo in schema? Could not find "$pointer" in "$fqn" ($ref_url)] unless defined $other;
-  }
-
-  $fqn->fragment($pointer // '');
-  return $other, $ref_url, $fqn;
 }
 
 1;

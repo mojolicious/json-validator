@@ -4,13 +4,12 @@ use Mojo::Base 'JSON::Validator::Schema';
 use JSON::Validator::Schema::Draft4;
 use JSON::Validator::Schema::Draft6;
 use JSON::Validator::Schema::Draft7;
+use JSON::Validator::URI qw(uri);
 use JSON::Validator::Util qw(E is_bool is_type json_pointer);
-use Scalar::Util qw(blessed refaddr);
+use Scalar::Util qw(refaddr);
 
-my $ANCHOR_RE = qr{[A-Za-z][A-Za-z0-9:._-]*};
-
+has moniker       => 'draft2019';
 has specification => 'https://json-schema.org/draft/2019-09/schema';
-has _anchors      => sub { +{} };
 
 sub _build_formats {
   my $formats = shift->JSON::Validator::Schema::Draft7::_build_formats;
@@ -19,75 +18,57 @@ sub _build_formats {
   return $formats;
 }
 
-sub _definitions_path_for_ref { ['$defs'] }
-sub _id_key                   {'$id'}
+sub _normalize_ref { $_[1]->{'$recursiveRef'} // $_[1]->{'$ref'} }
 
-sub _find_and_resolve_refs {
-  my ($self, $base_url, $root) = @_;
+sub _resolve_object {
+  my ($self, $state, $schema, $refs, $found) = @_;
 
-  my (@topics, @recursive_refs, @refs, %seen) = ([$base_url, $root]);
-  while (@topics) {
-    my ($base_url, $topic) = @{shift @topics};
-
-    if (is_type $topic, 'ARRAY') {
-      push @topics, map { [$base_url, $_] } @$topic;
-    }
-    elsif (is_type $topic, 'HASH') {
-      next if $seen{refaddr($topic)}++;
-
-      my $base_url = $base_url;    # do not change the global $base_url
-      if ($topic->{'$id'} and !ref $topic->{'$id'}) {
-        my $id = Mojo::URL->new($topic->{'$id'});
-        $id = $id->to_abs($base_url) unless $id->is_abs;
-        $self->store->add($id->to_string => $topic);
-        $base_url = $id;
-      }
-
-      if ($topic->{'$anchor'} && !ref $topic->{'$anchor'}) {
-        $self->_anchors->{$topic->{'$anchor'}} = $topic;
-      }
-
-      my $is_tied           = tied %$topic;
-      my $has_ref           = !$is_tied && $topic->{'$ref'}          && !ref $topic->{'$ref'}          ? 1 : 0;
-      my $has_recursive_ref = !$is_tied && $topic->{'$recursiveRef'} && !ref $topic->{'$recursiveRef'} ? 1 : 0;
-      push @refs,           [$base_url, $topic] if $has_ref;
-      push @recursive_refs, [$base_url, $topic] if $has_recursive_ref;
-
-      for my $key (keys %$topic) {
-        next unless ref $topic->{$key};
-        next if $has_ref           and $key eq '$ref';
-        next if $has_recursive_ref and $key eq '$recursiveRef';
-        push @topics, [$base_url, $topic->{$key}];
-      }
-    }
+  if ($schema->{'$anchor'} && !ref $schema->{'$anchor'}) {
+    my $id = uri(uri()->new->fragment($schema->{'$anchor'}), $state->{base_url});
+    $self->store->add($id => $schema);
+    $state = {%$state, base_url => $id->fragment(undef)->to_string};
+  }
+  if ($schema->{'$id'} and !ref $schema->{'$id'}) {
+    my $id = uri $schema->{'$id'}, $state->{base_url};
+    $self->store->add($id => $schema);
+    $state = {%$state};                                 # make sure we don't mutate $state ref
+    $state->{base_url} = $id->clone->fragment(undef);
   }
 
-  %seen = ();
-  while (@refs) {
-    my ($base_url, $topic) = @{shift @refs};
-    next if is_bool $topic;
-    next if !$topic->{'$ref'} or ref $topic->{'$ref'};
-    my $base = Mojo::URL->new($base_url || $base_url)->fragment(undef);
-    my ($other, $ref_url, $fqn) = $self->_resolve_ref($topic->{'$ref'}, $base, $root);
-    next if $seen{$fqn}++ and tied %$topic;
-    tie %$topic, 'JSON::Validator::Ref', $other, $topic, "$fqn";
-    push @refs, [$fqn, $other];
+  if ($found->{'$recursiveRef'} = $schema->{'$recursiveRef'} && !ref $schema->{'$recursiveRef'}) {
+    push @$refs, [$schema, $state];
+  }
+  if ($found->{'$ref'} = $schema->{'$ref'} && !ref $schema->{'$ref'}) {
+    push @$refs, [$schema, $state];
   }
 
-  %seen = ();
-  while (@recursive_refs) {
-    my ($base_url, $topic) = @{shift @recursive_refs};
-    my $base = Mojo::URL->new($base_url || $base_url)->fragment(undef);
-    my ($other, $ref_url, $fqn) = $self->_resolve_ref($topic->{'$recursiveRef'}, $base, $root);
-    next if $seen{$fqn}++ and tied %$topic;
-    tie %$topic, 'JSON::Validator::Ref', $other, $topic, "$fqn";
-  }
+  return $state;
 }
 
-sub _resolve_ref {
-  my ($self, $ref_url, $base_url, $root) = @_;
-  return $self->_anchors->{$1}, $ref_url, $ref_url if $ref_url =~ m!^#($ANCHOR_RE)$!;
-  return $self->SUPER::_resolve_ref($ref_url, $base_url, $root);
+sub _state {
+  my ($self, $curr, %override) = @_;
+
+  my $schema = $override{schema} // $curr->{schema};
+  my %seen;
+  while (ref $schema eq 'HASH') {
+    last unless my $ref = $schema->{'$ref'} || $schema->{'$recursiveRef'};
+    last if ref $ref;
+    my $addr = refaddr $schema;
+    last if $seen{$addr}++;
+    $schema = $self->_refs->{$addr}->{schema}
+      // Carp::confess(qq(You have to call resolve() before validate() to lookup "$schema->{'$ref'}".));
+  }
+
+  return {%$curr, %override, schema => $schema};
+}
+
+sub _state_for_get {
+  my ($self, $schema, $state) = @_;
+  return $self->_refs->{refaddr($schema)}
+    if ref $schema eq 'HASH'
+    and (($schema->{'$ref'} and !ref $schema->{'$ref'})
+    or ($schema->{'$recursiveRef'} and !ref $schema->{'$recursiveRef'}));
+  return {%$state, schema => $schema};
 }
 
 sub _validate_type_array_contains {
@@ -139,6 +120,7 @@ sub _validate_type_object_dependencies {
   return @errors;
 }
 
+*_bundle_ref_path                 = \&JSON::Validator::Schema::Draft7::_bundle_ref_path;
 *_validate_number_max             = \&JSON::Validator::Schema::Draft6::_validate_number_max;
 *_validate_number_min             = \&JSON::Validator::Schema::Draft6::_validate_number_min;
 *_validate_type_array             = \&JSON::Validator::Schema::Draft6::_validate_type_array;

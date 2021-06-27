@@ -22,8 +22,8 @@ subtest 'exclusiveMinimum' => sub {
 
 subtest 'bundle' => sub {
   my $bundle = JSON::Validator::Schema::Draft7->new('data://main/spec.json')->bundle;
-  is $bundle->data->{properties}{name}{'$ref'}, '#/$defs/_name', 'bundle ref';
-  is $bundle->data->{'$defs'}{_name}{type},     'string',        'bundled spec under $defs';
+  is $bundle->data->{properties}{name}{'$ref'},        '#/$defs/defs_json-name', 'bundle ref';
+  is $bundle->data->{'$defs'}{'defs_json-name'}{type}, 'string',                 'bundled spec under $defs';
 };
 
 done_testing;

@@ -23,10 +23,9 @@ isa_ok $jv->schema, 'JSON::Validator::Schema::Draft7';
 is $jv->schema->id,            'http://example.com/person.json',          'schema id';
 is $jv->schema->moniker,       'draft07',                                 'moniker';
 is $jv->schema->specification, 'http://json-schema.org/draft-07/schema#', 'schema specification';
-is $jv->_id_key, '$id', 'detected id_key from draft-07';
 
 eval { $jv->load_and_validate_schema("${base_url}invalid-relative.json") };
-like $@, qr{cannot have a relative}, 'Root id cannot be relative' or diag $@;
+like $@, qr{Relative URL not allowed}, 'Root id cannot be relative' or diag $@;
 
 done_testing;
 
