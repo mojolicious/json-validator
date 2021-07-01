@@ -2,7 +2,8 @@ package JSON::Validator::Util;
 use Mojo::Base -strict;
 
 use B;
-use Carp ();
+use Carp        ();
+use Digest::SHA ();
 use Exporter 'import';
 use JSON::Validator::Error;
 use List::Util;
@@ -14,9 +15,15 @@ use Scalar::Util 'blessed';
 
 use constant SEREAL_SUPPORT => !$ENV{JSON_VALIDATOR_NO_SEREAL} && eval 'use Sereal::Encoder 4.00;1';
 
+use constant UUID_NAMESPACE => do {
+  my $uuid = '1bab225d-1ca6-4cc5-9c53-a37cc7527848';    # UUIDv4
+  $uuid =~ tr/-//d;
+  pack 'H*', $uuid;
+};
+
 our @EXPORT_OK = (
   qw(E data_checksum data_section data_type is_bool is_num is_type),
-  qw(negotiate_content_type json_pointer prefix_errors schema_type),
+  qw(negotiate_content_type json_pointer prefix_errors schema_type urn),
 );
 
 sub E { JSON::Validator::Error->new(@_) }
@@ -160,6 +167,15 @@ sub schema_type {
   return '';
 }
 
+sub urn {
+  state $d = Digest::SHA->new(1);
+  $d->reset->add(UUID_NAMESPACE)->add(Mojo::JSON::encode_json(shift));
+  my $uuid = substr $d->digest, 0, 16;
+  substr $uuid, 6, 1, chr(ord(substr $uuid, 6, 1) & 0x0f | 0x50);    # set version 5
+  substr $uuid, 8, 1, chr(ord(substr $uuid, 8, 1) & 0x3f | 0x80);    # set variant 2
+  return sprintf 'urn:uuid:%s-%s-%s-%s-%s', map { unpack 'H*', $_ } map { substr $uuid, 0, $_, '' } 4, 2, 2, 2, 6;
+}
+
 # _guessed_right($type, $data);
 sub _guessed_right {
   return $_[0] if !defined $_[1];
@@ -290,6 +306,15 @@ faster if you specify "type". Both of the two below is valid, but the one with
 
   {"type": "object", "properties": {}} # Faster
   {"properties": {}}                   # Slower
+
+=head2 urn
+
+  $str = urn $data;
+
+This function can generate an URN for C<$data>. C<$data> will be serialized
+using L<Mojo::JSON/encode_json> before being used to generate an UUIDv5.
+
+This function is EXPERIMENTAL and subject to change!
 
 =head1 SEE ALSO
 

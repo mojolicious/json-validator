@@ -2,7 +2,8 @@ use Mojo::Base -strict;
 use Mojo::JSON 'false';
 use Mojo::Util 'md5_sum';
 use JSON::Validator;
-use JSON::Validator::Util qw(E data_checksum data_type negotiate_content_type schema_type prefix_errors json_pointer);
+use JSON::Validator::Util
+  qw(E data_checksum data_type negotiate_content_type schema_type prefix_errors json_pointer urn);
 use JSON::Validator::Util qw(is_bool is_num is_type);
 use Test::More;
 
@@ -84,6 +85,14 @@ subtest 'data_checksum with Sereal::Encoder' => sub {
   isnt data_checksum($d_obj),   data_checksum($d_undef),  'data_checksum object not undef';
   isnt data_checksum(3.14), md5_sum(3.15),         'data_checksum numeric';
   is data_checksum(3.14),   data_checksum('3.14'), 'data_checksum numeric like string';
+};
+
+subtest 'urn' => sub {
+  is urn(undef), 'urn:uuid:3653959e-b04e-59eb-bb17-3fcc2107e624', 'undef';
+  is urn(''),    'urn:uuid:1762bf14-5bcf-5969-9b32-d77109645b05', 'emptry string';
+  is urn('{}'),  'urn:uuid:9ad389e2-a3ca-5c82-8523-830abc834964', 'hash string';
+  is urn({}), 'urn:uuid:7897d6c0-e5fb-57fb-81e3-cdf28a438c70', 'hash';
+  is urn(['foo']), 'urn:uuid:da97e133-6ad8-5fa0-9cfb-682607dda243', 'array';
 };
 
 done_testing;
