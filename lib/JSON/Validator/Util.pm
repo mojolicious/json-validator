@@ -2,7 +2,8 @@ package JSON::Validator::Util;
 use Mojo::Base -strict;
 
 use B;
-use Carp ();
+use Carp        ();
+use Digest::SHA ();
 use Exporter 'import';
 use JSON::Validator::Error;
 use List::Util;
@@ -14,9 +15,15 @@ use Scalar::Util 'blessed';
 
 use constant SEREAL_SUPPORT => !$ENV{JSON_VALIDATOR_NO_SEREAL} && eval 'use Sereal::Encoder 4.00;1';
 
+use constant UUID_NAMESPACE => do {
+  my $uuid = '1bab225d-1ca6-4cc5-9c53-a37cc7527848';    # UUIDv4
+  $uuid =~ tr/-//d;
+  pack 'H*', $uuid;
+};
+
 our @EXPORT_OK = (
-  qw(E data_checksum data_section data_type is_type negotiate_content_type),
-  qw(schema_extract json_pointer prefix_errors schema_type),
+  qw(E data_checksum data_section data_type is_bool is_num is_type),
+  qw(negotiate_content_type json_pointer prefix_errors schema_type urn),
 );
 
 sub E { JSON::Validator::Error->new(@_) }
@@ -62,7 +69,7 @@ sub data_type {
   return 'null'    if !defined $_[0];
   return 'boolean' if $blessed and ("$_[0]" eq "1" or !"$_[0]");
 
-  if (is_type($_[0], 'NUM')) {
+  if (is_num($_[0])) {
     return 'integer' if grep { ($_->{type} // '') eq 'integer' } @{$_[1] || []};
     return 'number';
   }
@@ -70,21 +77,9 @@ sub data_type {
   return $blessed || 'string';
 }
 
-sub is_type {
-  my $type = $_[1];
-
-  if ($type eq 'BOOL') {
-    return blessed $_[0] && ($_[0]->isa('JSON::PP::Boolean') || "$_[0]" eq "1" || !$_[0]);
-  }
-
-  # NUM
-  if ($type eq 'NUM') {
-    return B::svref_2object(\$_[0])->FLAGS & (B::SVp_IOK | B::SVp_NOK) && 0 + $_[0] eq $_[0] && $_[0] * 0 == 0;
-  }
-
-  # Class or data type
-  return blessed $_[0] ? $_[0]->isa($type) : ref $_[0] eq $type;
-}
+sub is_bool { blessed $_[0] && ($_[0]->isa('JSON::PP::Boolean') || "$_[0]" eq "1" || !$_[0]) }
+sub is_num  { B::svref_2object(\$_[0])->FLAGS & (B::SVp_IOK | B::SVp_NOK) && 0 + $_[0] eq $_[0] && $_[0] * 0 == 0 }
+sub is_type { blessed $_[0] ? $_[0]->isa($_[1]) : ref $_[0] eq $_[1] }
 
 sub negotiate_content_type {
   my ($accepts, $header) = @_;
@@ -116,13 +111,6 @@ sub negotiate_content_type {
 
   # Could not find any valid content type
   return '';
-}
-
-sub schema_extract {
-  my ($data, $p, $cb) = @_;
-  $p = [ref $p ? @$p : length $p ? split('/', $p, -1) : $p];
-  shift @$p if @$p and defined $p->[0] and !length $p->[0];
-  _schema_extract($data, $p, '', $cb);
 }
 
 sub json_pointer {
@@ -179,45 +167,20 @@ sub schema_type {
   return '';
 }
 
+sub urn {
+  state $d = Digest::SHA->new(1);
+  $d->reset->add(UUID_NAMESPACE)->add(Mojo::JSON::encode_json(shift));
+  my $uuid = substr $d->digest, 0, 16;
+  substr $uuid, 6, 1, chr(ord(substr $uuid, 6, 1) & 0x0f | 0x50);    # set version 5
+  substr $uuid, 8, 1, chr(ord(substr $uuid, 8, 1) & 0x3f | 0x80);    # set variant 2
+  return sprintf 'urn:uuid:%s-%s-%s-%s-%s', map { unpack 'H*', $_ } map { substr $uuid, 0, $_, '' } 4, 2, 2, 2, 6;
+}
+
 # _guessed_right($type, $data);
 sub _guessed_right {
   return $_[0] if !defined $_[1];
   return $_[0] if $_[0] eq data_type $_[1], [{type => $_[0]}];
   return '';
-}
-
-sub _schema_extract {
-  my ($data, $path, $pos, $cb) = @_, my $tied;
-
-  while (@$path) {
-    my $p = shift @$path;
-
-    unless (defined $p) {
-      my $i = 0;
-      return Mojo::Collection->new(map { _schema_extract($_->[0], [@$path], json_pointer($pos, $_->[1]), $cb) }
-          ref $data eq 'ARRAY' ? map { [$_, $i++] }
-          @$data : ref $data eq 'HASH' ? map { [$data->{$_}, $_] } sort keys %$data : [$data, '']);
-    }
-
-    $p =~ s!~1!/!g;
-    $p =~ s/~0/~/g;
-    $pos = json_pointer $pos, $p if $cb;
-
-    if (ref $data eq 'HASH' and exists $data->{$p}) {
-      $data = $data->{$p};
-    }
-    elsif (ref $data eq 'ARRAY' and $p =~ /^\d+$/ and @$data > $p) {
-      $data = $data->[$p];
-    }
-    else {
-      return undef;
-    }
-
-    $data = $tied->schema while ref $data eq 'HASH' and $tied = tied %$data;
-  }
-
-  return $cb->($data, $pos) if $cb;
-  return $data;
 }
 
 sub _sereal_encode {
@@ -277,27 +240,24 @@ Returns the JSON type for C<$any>. C<$str> can be array, boolean, integer,
 null, number object or string. Note that a list of schemas need to be provided
 to differentiate between "integer" and "number".
 
+=head2 is_bool
+
+  $bool = is_bool $any;
+
+Checks if C<$any> looks like a boolean.
+
+=head2 is_num
+
+  $bool = is_num $any;
+
+Checks if C<$any> looks like a number.
+
 =head2 is_type
 
   $bool = is_type $any, $class;
-  $bool = is_type $any, $type; # $type = "ARRAY", "BOOL", "HASH", "NUM" ...
+  $bool = is_type $any, $type;
 
-Checks if C<$any> is a, or inherits from, C<$class> or C<$type>. Two special
-types can be checked:
-
-=over 2
-
-=item * BOOL
-
-Checks if C<$any> is a boolean value. C<$any> is considered boolean if it is an
-object inheriting from L<JSON::PP::Boolean> or is another object that
-stringifies to "1" or "0".
-
-=item * NUM
-
-Checks if C<$any> is indeed a number.
-
-=back
+Checks if C<$any> is a, or inherits from, C<$class> or C<$type>.
 
 =head2 json_pointer
 
@@ -319,32 +279,6 @@ wildcards, meaning "*/*" will match anything.
   @errors = prefix_errors $prefix, @errors;
 
 Consider this internal for now.
-
-=head2 schema_extract
-
-  $data       = schema_extract $any, $json_pointer;
-  $data       = schema_extract $any, "/x/cool_beans/y";
-  $collection = schema_extract $any, ["x", undef, "y"];
-  schema_extract $any, $json_pointer, sub { my ($data, $json_pointer) = @_ };
-
-The basic usage is to extract data from C<$any>, using a C<$json_pointer> -
-L<RFC 6901|http://tools.ietf.org/html/rfc6901>. It can however be used in a
-more complex way by passing in an array-ref, instead of a plain string. The
-array-ref can contain C<undef()> values, will result in extracting any element
-on that point, regardsless of value. In that case a L<Mojo::Collection> will
-be returned.
-
-A callback can also be given. This callback will be called each time the
-C<$json_pointer> matches some data, and will pass in the C<$json_pointer> at
-that place.
-
-In addition, if the C<$json_pointer> points to a L<JSON::Validator::Ref> at any
-point, the "$ref" will be followed, while if you used L<Mojo::JSON::Pointer>,
-it would return either the L<JSON::Validator::Ref> or C<undef()>.
-
-Even though L</schema_extract> has special capabilities for handling a
-JSON-Schema, it can be used for any data-structure, just like
-L<Mojo::JSON::Pointer>.
 
 =head2 schema_type
 
@@ -372,6 +306,15 @@ faster if you specify "type". Both of the two below is valid, but the one with
 
   {"type": "object", "properties": {}} # Faster
   {"properties": {}}                   # Slower
+
+=head2 urn
+
+  $str = urn $data;
+
+This function can generate an URN for C<$data>. C<$data> will be serialized
+using L<Mojo::JSON/encode_json> before being used to generate an UUIDv5.
+
+This function is EXPERIMENTAL and subject to change!
 
 =head1 SEE ALSO
 

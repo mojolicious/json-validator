@@ -4,7 +4,7 @@ use Mojo::File 'path';
 use Test::More;
 
 eval { JSON::Validator->new->schema('data://main/spec.json') };
-like $@, qr{Could not find.*/definitions/Pet"}, 'missing definition';
+like $@, qr{Unable to resolve .*/definitions/Pet"}, 'missing definition';
 
 my $workdir = path(__FILE__)->dirname;
 eval { JSON::Validator->new->schema(path($workdir, 'spec', 'missing-ref.json')); };

@@ -3,7 +3,8 @@ use Mojo::JSON 'false';
 use Mojo::Util 'md5_sum';
 use JSON::Validator;
 use JSON::Validator::Util
-  qw(E data_checksum data_type negotiate_content_type schema_type prefix_errors is_type json_pointer);
+  qw(E data_checksum data_type negotiate_content_type schema_type prefix_errors json_pointer urn);
+use JSON::Validator::Util qw(is_bool is_num is_type);
 use Test::More;
 
 my $e = E '/path/x', 'some error';
@@ -19,16 +20,18 @@ is data_type(undef), 'null', 'data_type null';
 is data_type($e), 'JSON::Validator::Error', 'data_type JSON::Validator::Error';
 
 my $v = JSON::Validator->new;
-ok is_type($v,    'JSON::Validator'), 'is_type JSON::Validator';
-ok is_type($v,    'Mojo::Base'),      'is_type Mojo::Base';
-ok is_type($v,    'HASH'),            'is_type HASH';
-ok is_type([],    'ARRAY'),           'is_type ARRAY';
-ok is_type({},    'HASH'),            'is_type HASH';
-ok is_type(4.2,   'NUM'),             'is_type 4.2';
-ok is_type(42,    'NUM'),             'is_type 42';
-ok is_type(false, 'BOOL'),            'is_type BOOL';
-ok !is_type('2',  'NUM'),             'is_type 2';
-ok !is_type(0,    'BOOL'),            'is_type BOOL';
+ok is_type($v, 'JSON::Validator'), 'is_type JSON::Validator';
+ok is_type($v, 'Mojo::Base'),      'is_type Mojo::Base';
+ok is_type($v, 'HASH'),            'is_type HASH';
+ok is_type([], 'ARRAY'),           'is_type ARRAY';
+ok is_type({}, 'HASH'),            'is_type HASH';
+
+ok is_num(4.2),  'is_num 4.2';
+ok is_num(42),   'is_num 42';
+ok !is_num('2'), 'is_num 2';
+
+ok is_bool(false), 'is_bool';
+ok !is_bool(0), 'is_bool';
 
 is json_pointer(qw(foo bar)),    'foo/bar',      'json_pointer foo bar';
 is json_pointer(qw(f/oo bar)),   'f/oo/bar',     'json_pointer f/oo bar';
@@ -82,6 +85,14 @@ subtest 'data_checksum with Sereal::Encoder' => sub {
   isnt data_checksum($d_obj),   data_checksum($d_undef),  'data_checksum object not undef';
   isnt data_checksum(3.14), md5_sum(3.15),         'data_checksum numeric';
   is data_checksum(3.14),   data_checksum('3.14'), 'data_checksum numeric like string';
+};
+
+subtest 'urn' => sub {
+  is urn(undef), 'urn:uuid:3653959e-b04e-59eb-bb17-3fcc2107e624', 'undef';
+  is urn(''),    'urn:uuid:1762bf14-5bcf-5969-9b32-d77109645b05', 'emptry string';
+  is urn('{}'),  'urn:uuid:9ad389e2-a3ca-5c82-8523-830abc834964', 'hash string';
+  is urn({}), 'urn:uuid:7897d6c0-e5fb-57fb-81e3-cdf28a438c70', 'hash';
+  is urn(['foo']), 'urn:uuid:da97e133-6ad8-5fa0-9cfb-682607dda243', 'array';
 };
 
 done_testing;

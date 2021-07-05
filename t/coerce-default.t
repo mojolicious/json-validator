@@ -10,9 +10,10 @@ $jv->coerce('def');
 is_deeply($jv->coerce, {defaults => 1}, 'coerce def');
 
 $jv->schema({
+  '$schema'   => 'http://json-schema.org/draft-04/schema#',
   type        => 'object',
   definitions => {subscribed_to => {type => 'array', default => []}},
-  properties =>
+  properties  =>
     {tos => {type => 'boolean', default => false}, subscribed_to => {'$ref' => '#/definitions/subscribed_to'}},
 });
 

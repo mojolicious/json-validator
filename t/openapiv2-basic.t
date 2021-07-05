@@ -12,8 +12,9 @@ subtest 'basic' => sub {
   is_deeply $schema->coerce, {booleans => 1, numbers => 1, strings => 1}, 'default coercion';
 
   eval {
-    my $s = JSON::Validator->new->schema('data://main/spec-resolve-refs.json')->schema->resolve;
+    my $s = JSON::Validator->new->schema('data://main/spec-resolve-refs.json')->schema;
     is $s->get([qw(paths /user get responses 200 schema type)]), 'object', 'resolved "User"';
+    1;
   } or do {
     diag $@;
     ok 0, 'Could not resolve "User"';

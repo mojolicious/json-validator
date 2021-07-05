@@ -18,7 +18,7 @@ sub acceptance {
   Test::More::plan(skip_all => $@)                            unless eval "require $schema_class;1";
 
   my $test = sub { +{file => $_[0], group_description => $_[1], test_description => $_[2]} };
-  my $ua   = _acceptance_ua($schema_class);
+  my $ua   = _acceptance_ua();
 
   $acceptance_params{todo_tests} = [map { $test->(@$_) } @{$acceptance_params{todo_tests}}]
     if $acceptance_params{todo_tests};
@@ -30,7 +30,7 @@ sub acceptance {
     %acceptance_params,
     validate_data => sub {
       my ($schema_p, $data_p) = map { Mojo::JSON::Pointer->new(shift @_) } qw(schema data);
-      my ($schema_d, $data_d) = map { clone($_->data) } $schema_p, $data_p;
+      my ($schema_d, $data_d) = map { decode_json(encode_json($_->data)) } $schema_p, $data_p;
 
       my $schema = $schema_class->new($schema_d, ua => $ua);
       return 0 if @{$schema->errors};
@@ -45,10 +45,6 @@ sub acceptance {
       return @errors ? 0 : 1;
     },
   );
-}
-
-sub clone {
-  return decode_json(encode_json($_[0]));
 }
 
 sub edj {
@@ -72,7 +68,7 @@ sub schema_validate_ok {
   my ($data, $schema, @expected) = @_;
   my $description = @expected ? "errors: @expected" : "valid: " . encode_json($data);
 
-  my @errors = t::Helper->schema->resolve($schema)->validate($data);
+  my @errors = t::Helper->schema->data($schema)->resolve->validate($data);
   local $Test::Builder::Level = $Test::Builder::Level + 1;
   Test::More::is_deeply([map { $_->TO_JSON } sort { $a->path cmp $b->path } @errors],
     [map { $_->TO_JSON } sort { $a->path cmp $b->path } @expected], $description)
@@ -117,7 +113,6 @@ sub import {
 }
 
 sub _acceptance_ua {
-  my $schema_class = shift;
   require Mojo::UserAgent;
   require Mojolicious;
   my $ua  = Mojo::UserAgent->new;
@@ -133,33 +128,6 @@ sub _acceptance_ua {
       $url->scheme(undef)->host(undef)->port(undef) if $url->host and $url->host eq 'localhost';
     }
   ) for qw(prepare start);
-
-  my $app_base_url = $ua->get('/')->req->url->to_abs->to_string;
-  $app_base_url =~ s!/$!!;
-
-  my $orig_load_schema = $schema_class->can('_load_schema');
-  monkey_patch $schema_class => _load_schema => sub {
-    my ($self, $url) = @_;
-    my $cached;
-    return $cached, $url if $cached = $self->_store($url);
-    $url =~ s!^https?://localhost:1234!$app_base_url!;
-    return $self->$orig_load_schema($url);
-  };
-
-  #my $orig_resolve_ref = $schema_class->can('_resolve_ref');
-  #monkey_patch $schema_class => _resolve_ref => sub {
-  #  my ($self, $ref_url, $base_url, $schema) = @_;
-  #  $ref_url  =~ s!^https?://localhost:1234!$app_base_url!;
-  #  $base_url =~ s!^https?://localhost:1234!$app_base_url!;
-  #  $self->$orig_resolve_ref($ref_url, $base_url, $schema);
-  #};
-
-  #my $orig_store       = $schema_class->can('_store');
-  #monkey_patch $schema_class => _store => sub {
-  #  my ($self, $id, $schema) = @_;
-  #  $id =~ s!^https?://localhost:1234!$app_base_url!;
-  #  $self->$orig_store($id, $schema);
-  #};
 
   return $ua;
 }
